@@ -33,17 +33,17 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           python - <<'PYEOF'
-          import os
-          from huggingface_hub import HfApi
-          api   = HfApi(token=os.environ["HF_TOKEN"])
-          url   = api.hf_hub_url("leo88888/cpbl-dashboard",
-                                  "pitcher_pitches.csv", repo_type="space")
-          import requests, pathlib
-          r = requests.get(url, headers={"Authorization": f"Bearer {os.environ['HF_TOKEN']}"},
-                           stream=True, timeout=120)
-          r.raise_for_status()
-          pathlib.Path("pitcher_pitches.csv").write_bytes(r.content)
-          print(f"✅ 下載完成，{len(r.content)/1e6:.1f} MB")
+          import os, shutil
+          from huggingface_hub import hf_hub_download
+          path = hf_hub_download(
+              repo_id="leo88888/cpbl-dashboard",
+              filename="pitcher_pitches.csv",
+              repo_type="space",
+              token=os.environ["HF_TOKEN"],
+          )
+          shutil.copy(path, "pitcher_pitches.csv")
+          size = os.path.getsize("pitcher_pitches.csv")
+          print(f"✅ 下載完成，{size/1e6:.1f} MB")
           PYEOF
 
       # ── 4. 執行每日更新 + 發送 LINE 報告 ───────────────────────
