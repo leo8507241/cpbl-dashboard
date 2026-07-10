@@ -1,0 +1,65 @@
+name: 推送程式碼時自動部署至 HuggingFace
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pages/**'
+      - 'app.py'
+      - 'requirements.txt'
+      - 'archetypes.py'
+      - '每日追蹤/archetypes.py'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install huggingface_hub
+        run: pip install huggingface_hub
+
+      - name: Deploy to HuggingFace Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python - <<'PYEOF'
+          import os
+          from huggingface_hub import HfApi
+
+          api  = HfApi(token=os.environ["HF_TOKEN"])
+          user = "leo88888"
+          repo = f"{user}/cpbl-dashboard"
+
+          files = {
+              "被低估打者預測.py":       "app.py",
+              "requirements.txt":       "requirements.txt",
+              "archetypes.py":          "每日追蹤/archetypes.py",
+              "pages/1_打者趨勢雷達.py":  "pages/1_打者趨勢雷達.py",
+              "pages/2_投手剋星分析.py":  "pages/2_投手剋星分析.py",
+              "pages/3_林立效應分析.py":  "pages/3_林立效應分析.py",
+              "pages/4_投手弱點分析.py":  "pages/4_投手弱點分析.py",
+          }
+
+          for remote, local in files.items():
+              if not os.path.exists(local):
+                  print(f"⚠️  {local} 不存在，跳過")
+                  continue
+              api.upload_file(
+                  path_or_fileobj=local,
+                  path_in_repo=remote,
+                  repo_id=repo,
+                  repo_type="space",
+                  commit_message=f"Auto deploy: {remote}",
+              )
+              print(f"✅ {remote}")
+          print("🚀 部署完成")
+          PYEOF

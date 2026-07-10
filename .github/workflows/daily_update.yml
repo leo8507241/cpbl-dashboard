@@ -1,0 +1,78 @@
+name: CPBL 每日自動更新
+
+on:
+  schedule:
+    # 溫哥華時間早上 8:00 PDT（UTC-7，4~10月）= 15:00 UTC
+    # 冬令時 PST（UTC-8，11~3月）時為早上 7:00，仍可接受
+    - cron: '0 15 * * *'
+  workflow_dispatch:  # 允許在 GitHub 頁面手動觸發
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      # ── 1. 取得程式碼 ───────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Python 環境 ──────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt huggingface_hub pytz
+
+      # ── 3. 從 HuggingFace 下載最新 pitcher_pitches.csv ─────────
+      - name: Download pitcher_pitches.csv
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python - <<'PYEOF'
+          import os
+          from huggingface_hub import HfApi
+          api   = HfApi(token=os.environ["HF_TOKEN"])
+          url   = api.hf_hub_url("leo88888/cpbl-dashboard",
+                                  "pitcher_pitches.csv", repo_type="space")
+          import requests, pathlib
+          r = requests.get(url, headers={"Authorization": f"Bearer {os.environ['HF_TOKEN']}"},
+                           stream=True, timeout=120)
+          r.raise_for_status()
+          pathlib.Path("pitcher_pitches.csv").write_bytes(r.content)
+          print(f"✅ 下載完成，{len(r.content)/1e6:.1f} MB")
+          PYEOF
+
+      # ── 4. 執行每日更新 + 發送 LINE 報告 ───────────────────────
+      - name: Run daily pipeline
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_WRITE_KEY: ${{ secrets.SUPABASE_WRITE_KEY }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
+          HF_USER: leo88888
+        run: python daily_pipeline.py
+
+      # ── 5. 上傳更新後的 pitcher_pitches.csv 回 HuggingFace ─────
+      - name: Upload pitcher_pitches.csv to HuggingFace
+        if: always()  # 即使前一步有警告也要上傳
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python - <<'PYEOF'
+          import os
+          from huggingface_hub import HfApi
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          api.upload_file(
+              path_or_fileobj="pitcher_pitches.csv",
+              path_in_repo="pitcher_pitches.csv",
+              repo_id="leo88888/cpbl-dashboard",
+              repo_type="space",
+              commit_message="Auto update pitcher_pitches.csv",
+          )
+          print("✅ pitcher_pitches.csv 已上傳")
+          PYEOF

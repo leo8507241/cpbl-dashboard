@@ -1,0 +1,8 @@
+streamlit>=1.51
+pandas>=2.3
+plotly>=6.3
+supabase==2.31.0
+requests>=2.32
+beautifulsoup4>=4.13
+pytz>=2024.1
+huggingface_hub>=0.23
