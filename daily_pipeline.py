@@ -101,13 +101,16 @@ def main():
     print("\n" + "="*55)
     print("② 投手逐球 CSV")
     print("="*55)
-    rows_before    = csv_row_count(CSV_PATH)
-    pitch_new_rows = 0
+    rows_before        = csv_row_count(CSV_PATH)
+    pitch_new_rows     = 0
+    pitch_new_pitchers = []
     try:
         import fetch_new_pitchers
-        fetch_new_pitchers.main()
+        result = fetch_new_pitchers.main()
         rows_after = csv_row_count(CSV_PATH)
         pitch_new_rows = max(0, rows_after - rows_before)
+        if result and isinstance(result, dict):
+            pitch_new_pitchers = result.get("pitchers", [])
 
         if pitch_new_rows > 0:
             print(f"\n新增 {pitch_new_rows:,} 球，執行 enrich_pitches.py...")
@@ -117,7 +120,7 @@ def main():
         errors.append(f"投手逐球：{e}")
         print(f"⚠️  投手逐球更新失敗：{e}")
 
-    # ─── 組 LINE 訊息 ─────────────────────────────────────────────
+    # ─── 組報告 ──────────────────────────────────────────────────
     no_update = (new_games == 0 and pitch_new_rows == 0 and not errors)
 
     if no_update:
@@ -129,21 +132,43 @@ def main():
         )
     else:
         lines = [
-            "\n📊 CPBL 每日更新報告",
+            "📊 CPBL 每日更新報告",
             f"📅 台北 {date_tp}｜溫哥華 {time_van}",
-            "",
+            "=" * 40,
         ]
-        if new_games > 0:
-            lines.append(f"⚾ 逐場記錄：新增 {new_games} 場比賽")
-        if new_matchup_rows > 0:
-            lines.append(f"📋 打席對戰：新增 {new_matchup_rows:,} 筆")
-        if pitch_new_rows > 0:
-            lines.append(f"🎯 投手逐球：新增 {pitch_new_rows:,} 球")
-        if errors:
+
+        # ① 打者資料
+        if new_games > 0 or new_matchup_rows > 0:
+            lines.append("【打者資料更新】")
+            if new_games > 0:
+                lines.append(f"  ⚾ 逐場比賽記錄：新增 {new_games} 場")
+            if new_matchup_rows > 0:
+                lines.append(f"  📋 打席對戰紀錄：新增 {new_matchup_rows:,} 筆")
+            lines.append("  → 影響頁面：被低估打者預測、打者趨勢雷達、")
+            lines.append("              投手剋星分析、林立效應分析")
             lines.append("")
+
+        # ② 投手逐球
+        if pitch_new_rows > 0:
+            lines.append("【投手逐球更新】")
+            lines.append(f"  🎯 新增球數：{pitch_new_rows:,} 球")
+            if pitch_new_pitchers:
+                lines.append(f"  📌 新增投手（{len(pitch_new_pitchers)} 位）：")
+                for p in pitch_new_pitchers:
+                    lines.append(f"     • {p['name']}（{p['team']}）"
+                                 f"  {p['rows']:,} 球  {p['date_range']}")
+            lines.append("  → HuggingFace Space 已同步更新")
+            lines.append("  → 影響頁面：投手弱點分析")
+            lines.append("")
+
+        # 錯誤
+        if errors:
+            lines.append("【⚠️ 注意事項】")
             for err in errors:
-                lines.append(f"⚠️ {err}")
-        lines += ["", f"🔗 {SPACE_URL}"]
+                lines.append(f"  ⚠️ {err}")
+            lines.append("")
+
+        lines += ["=" * 40, f"🔗 {SPACE_URL}"]
         msg = "\n".join(lines)
 
     subject = f"📊 CPBL 每日更新報告 {date_tp}"

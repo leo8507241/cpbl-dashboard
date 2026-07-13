@@ -73,6 +73,10 @@ def main():
     df = pd.read_csv(CSV_IN)
     print(f"讀入 {len(df)} 筆")
 
+    # 若已有這些欄位（fetch_new_pitchers 已初步填入），先移除再重新 enrich，避免 concat 後欄位重複
+    ENRICH_COLS = ["pa_result_type", "is_hit", "trajectory", "pitch_loc_x", "pitch_loc_y"]
+    df = df.drop(columns=[c for c in ENRICH_COLS if c in df.columns])
+
     combos = (df[["pitcher", "pitcher_uid", "season_uid"]]
               .drop_duplicates()
               .values.tolist())

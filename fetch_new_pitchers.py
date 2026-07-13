@@ -228,7 +228,7 @@ def main(dry_run=False):
 
     if not all_new_rows:
         print("\n沒有抓到任何新資料。")
-        return
+        return {"new_rows": 0, "pitchers": []}
 
     new_df = pd.DataFrame(all_new_rows)
     # Ensure column order matches existing CSV
@@ -241,6 +241,22 @@ def main(dry_run=False):
     combined.to_csv(CSV_PATH, index=False)
     print(f"\n完成！新增 {len(new_df):,} 筆，合計 {len(combined):,} 筆 → {CSV_PATH}")
     print(f"投手清單：{sorted(combined['pitcher'].unique())}")
+
+    # 整理每位新投手的統計（供報告用）
+    pitcher_summary = []
+    for p in new_pitchers:
+        sub = new_df[new_df["pitcher_uid"] == p["uid"]]
+        dates = pd.to_datetime(sub["game_date"], errors="coerce").dropna()
+        date_range = (f"{dates.min().strftime('%m/%d')}–{dates.max().strftime('%m/%d')}"
+                      if len(dates) else "–")
+        pitcher_summary.append({
+            "name":       p["name"],
+            "team":       p["team"],
+            "rows":       len(sub),
+            "date_range": date_range,
+        })
+
+    return {"new_rows": len(new_df), "pitchers": pitcher_summary}
 
 
 if __name__ == "__main__":
