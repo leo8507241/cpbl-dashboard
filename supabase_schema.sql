@@ -43,15 +43,17 @@ create table if not exists cpbl_pitcher_pitches (
     is_ball boolean,
     in_play text,
     result_code text,
-    pa_last_pitch_code text,
+    pa_result text,
     pa_result_type text,
     is_hit boolean,
     trajectory text,
     pitch_loc_x double precision,
     pitch_loc_y double precision,
     velocity_clean double precision,
-    rpm_clean double precision,
-    unique (pitcher_uid, game_date, inning, pa_order, pitch_seq)
+    rpm_clean double precision
+    -- 沒有對(pitcher_uid, game_date, inning, pa_order, pitch_seq)加unique：正式資料裡這組key
+    -- 有極少數(約0.14%)真的重複但內容不同的列(可能是原始爬蟲對同一球記錄兩筆)，硬加unique
+    -- 會導致同步時要武斷丟掉其中一筆真實資料。如實存放，不做假設。
 );
 create index if not exists idx_pitches_year on cpbl_pitcher_pitches(year);
 create index if not exists idx_pitches_pitcher on cpbl_pitcher_pitches(pitcher_uid);
