@@ -50,12 +50,21 @@ jobs:
       - name: Run daily pipeline
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_WRITE_KEY: ${{ secrets.SUPABASE_WRITE_KEY }}
+          # 修正：舊版這裡設SUPABASE_WRITE_KEY，但daily_update.py讀的是SUPABASE_KEY，
+          # 等於一直沒吃到有寫入權限的key、默默fallback成寫死的publishable key。
+          SUPABASE_KEY: ${{ secrets.SUPABASE_WRITE_KEY }}
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
           HF_USER: leo88888
         run: python daily_pipeline.py
+
+      # ── 4b. 同步投手疲勞分析資料到 Supabase(單場即時換投監控頁面用) ─
+      - name: Sync intra-game fatigue data to Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_WRITE_KEY }}
+        run: python sync_intra_game_to_supabase.py --incremental
 
       # ── 5. 上傳更新後的 pitcher_pitches.csv 回 HuggingFace ─────
       - name: Upload pitcher_pitches.csv to HuggingFace

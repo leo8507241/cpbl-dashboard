@@ -9,6 +9,7 @@ on:
       - 'requirements.txt'
       - 'archetypes.py'
       - '每日追蹤/archetypes.py'
+      - 'fatigue_common.py'
 
 jobs:
   deploy:
@@ -43,10 +44,12 @@ jobs:
               "被低估打者預測.py":       "app.py",
               "requirements.txt":       "requirements.txt",
               "archetypes.py":          "每日追蹤/archetypes.py",
+              "fatigue_common.py":      "fatigue_common.py",
               "pages/1_打者趨勢雷達.py":  "pages/1_打者趨勢雷達.py",
               "pages/2_投手剋星分析.py":  "pages/2_投手剋星分析.py",
               "pages/3_林立效應分析.py":  "pages/3_林立效應分析.py",
               "pages/4_投手弱點分析.py":  "pages/4_投手弱點分析.py",
+              "pages/5_單場即時換投監控.py": "pages/5_單場即時換投監控.py",
           }
 
           for remote, local in files.items():
