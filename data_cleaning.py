@@ -17,8 +17,13 @@ _OCR_FIXES = {"O": "0", "o": "0", "I": "1", "l": "1"}
 _NON_DIGIT_RE = re.compile(r"[^\d.]")
 
 
-def _extract_numeric(raw: str) -> float | None:
-    """修正常見OCR誤字後，去除所有非數字字元只留數字本體；純垃圾值(如'*'/'A'/'q')留空。"""
+def _extract_numeric(raw) -> float | None:
+    """修正常見OCR誤字後，去除所有非數字字元只留數字本體；純垃圾值(如'*'/'A'/'q')留空。
+    raw理論上是astype(str)轉換後的字串，但不同pandas版本/後端(如PyArrow-backed字串陣列)
+    對缺失值的處理不一致，NaN/None有時候會繞過astype(str)直接以float型別傳進來，
+    這裡明確擋掉非字串輸入，不能假設一定是str。"""
+    if not isinstance(raw, str):
+        return None
     s = raw.strip()
     for bad, good in _OCR_FIXES.items():
         s = s.replace(bad, good)
