@@ -158,7 +158,7 @@ def logs_to_rows(pitcher_name, pitcher_uid, season_uid, year, games):
                     "is_ball":        is_bl,
                     "in_play":        in_pl,
                     "result_code":    code,
-                    "pa_result":      code,        # last pitch code of the PA (same convention as original CSV)
+                    "pa_last_pitch_code": code,    # 打席最後一球的逐球代碼(跟result_code同義但回填整個打席)，別跟下面的pa_result_type搞混
                     "pa_result_type": pa_result,
                     "is_hit":         is_hit_pa,
                     "trajectory":     traj,
@@ -176,11 +176,11 @@ def logs_to_rows(pitcher_name, pitcher_uid, season_uid, year, games):
                     if not (code in ("F", "FT", "BUNT", "FOUL_BUNT") and strikes >= 2):
                         strikes += 1
 
-            # back-fill pa_result (last pitch code) for all pitches in this PA
+            # back-fill pa_last_pitch_code for all pitches in this PA
             if rows and last_code:
                 pa_start = len(rows) - pitch_seq
                 for i in range(pa_start, len(rows)):
-                    rows[i]["pa_result"] = last_code
+                    rows[i]["pa_last_pitch_code"] = last_code
 
     return rows
 
