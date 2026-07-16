@@ -116,7 +116,8 @@ def _parse_game(g, pitcher_uid, pitcher_name, pitcher_team, year):
         result     = RESULT_MAP.get(raw_result, "OUT") if raw_result else "OTHER"
 
         pa_round = pa.get("PA_round", 0)
-        main_event_no = f"{game_uid}_{pitcher_uid}_{pa_round}"
+        # 加入 batter_uid 確保同一場中不同打者的 PA_round=1 不會碰撞
+        main_event_no = f"{game_uid}_{pitcher_uid}_{batter_uid}_{pa_round}"
 
         records.append({
             "year":         year,

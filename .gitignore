@@ -1,6 +1,9 @@
-# ── 大型資料檔（存在 HuggingFace，不放 git）──────────────────
+# ── 大型資料檔（存在 HuggingFace 或本地 cache，不放 git）──────
 pitcher_pitches.csv
 每日追蹤/matchup_log_cache.csv
+每日追蹤/matchup_log_rebas_cache.csv
+每日追蹤/batter_gamelog_cache.csv
+每日追蹤/batter_gamelog_rebas_cache.csv
 
 # ── Python ──────────────────────────────────────────────────
 __pycache__/

@@ -326,10 +326,14 @@ def main():
                     pass
             if "打席對戰紀錄" in line and "新增" in line:
                 try:
-                    new_matchup_rows = int(
-                        line.split("新增")[1].split("個")[0]
-                        .strip().replace("，", "").replace(",", "")
-                    )
+                    part = line.split("新增")[1]
+                    # rebas.tw 格式："新增 N 場、M 個打席"
+                    if "場、" in part:
+                        new_matchup_rows = int(part.split("場、")[1].split("個")[0].strip())
+                    else:
+                        new_matchup_rows = int(
+                            part.split("個")[0].strip().replace("，", "").replace(",", "")
+                        )
                 except Exception:
                     pass
     except Exception as e:
