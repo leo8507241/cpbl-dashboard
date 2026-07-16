@@ -49,23 +49,30 @@ TEAM_ABBR_MAP = {
 }
 
 # rebas.tw PA result → 標準化結果（與 CPBL 版對齊）
+# rebas.tw 把一般四壞保送叫 "uBB"（unintentional BB），不是 "BB"
+# FO=飛球出局、GO=滾地出局，均為 OUT
 RESULT_MAP = {
     "1B": "1B", "IH": "1B",
     "2B": "2B",
     "3B": "3B",
     "HR": "HR",
     "BB": "BB",
+    "uBB": "BB",   # rebas.tw 一般四壞保送（intentional walk 仍用 IBB）
     "IBB": "IBB",
     "HBP": "HBP",
     "SF": "SF",
     "SH": "SAC",
+    "SH_FC": "SAC",
     "BUNT": "SAC",
     "SO": "SO",
     "K": "SO",
     "GIDP": "GIDP",
-    "FC":   "OUT",
-    "E":    "OTHER",
-    "OUT":  "OUT",
+    "FC":  "OUT",
+    "FO":  "OUT",  # 飛球出局
+    "GO":  "OUT",  # 滾地出局
+    "E":   "OTHER",
+    "ID":  "OTHER",
+    "OUT": "OUT",
 }
 
 
