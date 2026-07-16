@@ -2,9 +2,9 @@ name: CPBL 每日自動更新
 
 on:
   schedule:
-    # 溫哥華時間早上 8:00 PDT（UTC-7，4~10月）= 15:00 UTC
-    # 冬令時 PST（UTC-8，11~3月）時為早上 7:00，仍可接受
-    - cron: '0 15 * * *'
+    # 溫哥華時間早上 9:00 PDT（UTC-7，4~10月）= 16:00 UTC = 台灣半夜 00:00
+    # 冬令時 PST（UTC-8，11~3月）時為早上 8:00
+    - cron: '0 16 * * *'
   workflow_dispatch:  # 允許在 GitHub 頁面手動觸發
 
 jobs:
