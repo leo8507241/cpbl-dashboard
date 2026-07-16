@@ -97,6 +97,38 @@ def _game_to_record(g, uid, name, team_full, year):
     }
 
 
+def _delete_cpbl_format_rows(client, year):
+    """刪除 Supabase 中 CPBL 格式（全數字 batter_acnt）的舊資料，避免與 rebas.tw 格式重複。"""
+    try:
+        # 分批抓所有 batter_acnt（Supabase 預設 limit=1000，需分頁確保不漏）
+        all_acnts = set()
+        page, page_size = 0, 1000
+        while True:
+            batch = (client.table("cpbl_batter_game_log")
+                     .select("batter_acnt").eq("year", year)
+                     .range(page * page_size, (page + 1) * page_size - 1)
+                     .execute().data)
+            for r in batch:
+                all_acnts.add(r["batter_acnt"])
+            if len(batch) < page_size:
+                break
+            page += 1
+        all_rows = [{"batter_acnt": a} for a in all_acnts]
+        # CPBL 格式全為數字（"0000002286"），rebas.tw 含英文字母（"RJzVu"）
+        cpbl_acnts = list({r["batter_acnt"] for r in all_rows
+                           if r.get("batter_acnt", "").isdigit()})
+        if not cpbl_acnts:
+            return
+        print(f"  清除 {year} 年 CPBL 格式舊資料（{len(cpbl_acnts)} 個球員帳號）…")
+        for i in range(0, len(cpbl_acnts), 50):
+            batch = cpbl_acnts[i:i+50]
+            (client.table("cpbl_batter_game_log")
+             .delete().eq("year", year).in_("batter_acnt", batch).execute())
+        print(f"  ✅ CPBL 格式舊資料清除完成")
+    except Exception as e:
+        print(f"  ⚠ 清除舊格式失敗（不影響寫入）：{e}")
+
+
 def main(start_year=None, end_year=None):
     from datetime import datetime
     start_year = start_year or 2025
@@ -150,6 +182,10 @@ def main(start_year=None, end_year=None):
     if client is None:
         print("⚠️  沒有 SUPABASE_WRITE_KEY，僅更新本地 CSV cache")
     else:
+        # 先清除 CPBL 格式（全數字 batter_acnt）的舊資料，避免與 rebas.tw 格式重複造成儀表板雙算
+        for season_uid, year in SEASONS:
+            if start_year <= year <= end_year:
+                _delete_cpbl_format_rows(client, year)
         common.upsert_batches(client, TABLE_NAME, rows, on_conflict="year,game_sno,batter_acnt")
 
     print(f"\n打者逐場資料（rebas.tw）：新增 {new_games} 場、{new_rows} 筆打者紀錄，"
