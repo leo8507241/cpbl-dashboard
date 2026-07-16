@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.cpbl.linli.dailyupdate</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/anaconda3/bin/python3</string>
+        <string>/Users/leochen/Desktop/線上課程教材/pythan基礎觀念/爬蟲/樂天林立分析/daily_update.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/leochen/Desktop/線上課程教材/pythan基礎觀念/爬蟲/樂天林立分析</string>
+
+    <!-- 每天早上 8:05 執行（跟另一個 com.cpbl.dailyupdate 8:00 錯開一點）-->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>8</integer>
+        <key>Minute</key>
+        <integer>5</integer>
+    </dict>
+
+    <!-- 開機/登入時也補跑一次，並自動開瀏覽器顯示儀表板 -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/leochen/Desktop/線上課程教材/pythan基礎觀念/爬蟲/樂天林立分析/daily_update.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/leochen/Desktop/線上課程教材/pythan基礎觀念/爬蟲/樂天林立分析/daily_update.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/anaconda3/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>

@@ -198,7 +198,8 @@ def _diff_pitcher(before, after):
 def build_email(date_tp, time_van, year,
                 before, after,
                 batting_updated, pitch_new_rows, pitch_new_pitchers,
-                new_games, new_matchup_rows, errors):
+                new_games, new_matchup_rows, errors,
+                lin_li_new_games=0, lin_li_total_games=0, lin_li_latest_date=""):
 
     lines = [
         "📊 CPBL 每日更新報告",
@@ -221,13 +222,13 @@ def build_email(date_tp, time_van, year,
 
     # ② 林立效應分析
     lines.append("② 林立效應分析")
-    lines.append(f"   資料源：rebas.tw 打者逐場紀錄 → Supabase")
-    if batting_updated:
-        lines.append(_diff_gamelog(before.get("gamelog"), after.get("gamelog"), "gamelog"))
-        if new_games > 0:
-            lines.append(f"  ⚾ 本次新增 {new_games} 場")
+    lines.append(f"   資料源：rebas.tw + Supabase → lin_li_games_cache.csv → HuggingFace")
+    if lin_li_new_games > 0:
+        lines.append(f"  ⚾ 本次新增 {lin_li_new_games} 場")
+    elif lin_li_total_games > 0:
+        lines.append(f"  ✅ 無新場次（共 {lin_li_total_games} 場，最新 {lin_li_latest_date}）")
     else:
-        lines.append("  ⚠️ 隨打者資料一起執行，請見上方")
+        lines.append("  ❌ 更新失敗（見下方錯誤）")
     lines.append("")
 
     # ③ 投手剋星分析
@@ -335,9 +336,60 @@ def main():
         errors.append(f"打者資料：{e}")
         print(f"⚠️  打者資料更新失敗：{e}")
 
-    # ── ② 投手逐球 CSV ────────────────────────────────────────────────
+    # ── ② 林立效應分析 CSV（rebas.tw + Supabase）────────────────────────
     print("\n" + "="*55)
-    print("② 投手逐球 CSV（rebas.tw）")
+    print("② 林立效應分析（rebas.tw + Supabase）")
+    print("="*55)
+    lin_li_new_games = 0
+    lin_li_total_games = 0
+    lin_li_latest_date = ""
+    try:
+        lin_li_dir = os.path.join(os.path.dirname(__file__), "樂天林立分析")
+        sys.path.insert(0, lin_li_dir)
+        import importlib
+        sg = importlib.import_module("scrape_games")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            new_lin_li = sg.main()
+        output = buf.getvalue()
+        print(output)
+        if isinstance(new_lin_li, list):
+            lin_li_new_games = len(new_lin_li)
+
+        # 取最新場次日期
+        import csv as _csv
+        cache_path = os.path.join(lin_li_dir, "lin_li_games_cache.csv")
+        if os.path.exists(cache_path):
+            with open(cache_path, encoding="utf-8-sig") as f:
+                rows_lin = list(_csv.DictReader(f))
+            lin_li_total_games = len(rows_lin)
+            lin_li_latest_date = max(r["date"] for r in rows_lin) if rows_lin else ""
+
+        # 推送至 cpbl-dashboard
+        from huggingface_hub import HfApi
+        hf_api = HfApi()
+        hf_dir = os.path.join(lin_li_dir, "hf_space")
+        import shutil
+        shutil.copy(cache_path, os.path.join(hf_dir, "lin_li_games_cache.csv"))
+        lu_path = os.path.join(lin_li_dir, "last_update.json")
+        shutil.copy(lu_path, os.path.join(hf_dir, "last_update.json"))
+        for fname in ["lin_li_games_cache.csv", "last_update.json", "stats.py"]:
+            local = os.path.join(hf_dir, fname)
+            if os.path.exists(local):
+                hf_api.upload_file(
+                    path_or_fileobj=local,
+                    path_in_repo=fname,
+                    repo_id="leo88888/cpbl-dashboard",
+                    repo_type="space",
+                )
+        print("  ✅ 林立資料已推送至 cpbl-dashboard")
+    except Exception as e:
+        errors.append(f"林立效應：{e}")
+        print(f"⚠️  林立效應更新失敗：{e}")
+
+    # ── ③ 投手逐球 CSV ────────────────────────────────────────────────
+    print("\n" + "="*55)
+    print("③ 投手逐球 CSV（rebas.tw）")
     print("="*55)
     pitch_new_rows     = 0
     pitch_new_pitchers = []
@@ -365,7 +417,7 @@ def main():
     after = take_snapshot(year)
 
     # ── 組 Email ──────────────────────────────────────────────────────
-    no_update = (not batting_updated and pitch_new_rows == 0 and not errors)
+    no_update = (not batting_updated and pitch_new_rows == 0 and lin_li_new_games == 0 and not errors)
 
     if no_update:
         msg = (
@@ -380,6 +432,9 @@ def main():
             before, after,
             batting_updated, pitch_new_rows, pitch_new_pitchers,
             new_games, new_matchup_rows, errors,
+            lin_li_new_games=lin_li_new_games,
+            lin_li_total_games=lin_li_total_games,
+            lin_li_latest_date=lin_li_latest_date,
         )
 
     subject = f"📊 CPBL 每日更新報告 {date_tp}"
