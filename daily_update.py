@@ -1,8 +1,8 @@
 """
 CPBL 每日自動更新腳本
 功能：
-  1. 爬取 CPBL 官網當年度（2026）所有球隊累計打擊數據
-  2. 合併 rebas.tw 進階指標（BABIP、ISO、wRC+、bb_pct、k_pct 等）
+  1. 從 rebas.tw 抓全聯盟累計打擊數據（standard + advanced + new 三個 section）
+  2. 計算 wOBA / wRC+ / BABIP / ISO 等進階指標
   3. Upsert 進 Supabase cpbl_batting_2020_2026 表格
   4. 呼叫 每日追蹤/run_daily.py 更新逐場紀錄
 
@@ -12,13 +12,11 @@ CPBL 每日自動更新腳本
 """
 import sys
 import os
-import re
 import logging
 from datetime import datetime
 from time import sleep
 
 import requests
-from bs4 import BeautifulSoup
 import pandas as pd
 from supabase import create_client
 
@@ -27,32 +25,21 @@ SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://vxgtgqlqukexpvnnvslf.supa
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'sb_publishable_9DDMVwHFIMCdBxN12jaWkQ_gMeJkRuI')
 TABLE = 'cpbl_batting_2020_2026'
 
-TEAMS = {
-    'ACN': '中信兄弟',
-    'AKP': '台鋼雄鷹',
-    'ADD': '統一獅',
-    'AAA': '味全龍',
-    'AEO': '富邦悍將',
-    'AJL': '樂天桃猿',
-}
-
 UA = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
       'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
-COLUMNS = [
-    'g', 'pa', 'ab', 'rbi', 'r', 'h', '1B', '2B', '3B', 'hr', 'tb',
-    'so', 'sb', 'obp', 'slg', 'avg', 'gidp', 'sac', 'sf', 'bb',
-    'ibb', 'hbp', 'cs', 'go', 'ao', 'GO/AO', 'SB%', 'ops', '_ssa'
-    # 第 29 欄是 CPBL 銀棒指數（非 wOBA），只爬進來不用於計算，以 _ssa 暫存後丟棄
-]
-INT_COLS = {'g', 'pa', 'ab', 'rbi', 'r', 'h', '1B', '2B', '3B', 'hr', 'tb',
-            'so', 'sb', 'gidp', 'sac', 'sf', 'bb', 'ibb', 'hbp', 'cs', 'go'}
+# rebas.tw 球隊縮寫 → 中文全名
+TEAM_ABBR_MAP = {
+    '象': '中信兄弟',
+    '鷹': '台鋼雄鷹',
+    '獅': '統一獅',
+    '龍': '味全龍',
+    '悍': '富邦悍將',
+    '猿': '樂天桃猿',
+}
 
-# wOBA 線性權重（固定常數，不需要官方每年校正也夠用於相對排名）
+# wOBA 線性權重
 W_BB, W_HBP, W_1B, W_2B, W_3B, W_HR = 0.69, 0.72, 0.88, 1.24, 1.57, 2.00
-
-# 過濾非真實球員的名稱（官網彙總/特殊列）
-FAKE_PLAYERS = {'魔鷹'}
 
 # Supabase 表格欄位（排除 id / auto 欄位）
 SUPABASE_COLS = {
@@ -76,42 +63,65 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-# ── CPBL 爬蟲 ─────────────────────────────────────────────────────────────
-def scrape_team_year(session, team_code, team_name, year):
-    base_url = f'https://www.cpbl.com.tw/team/teamscore?ClubNo={team_code}'
-    page = session.get(base_url, headers={'User-Agent': UA}, timeout=20)
-    soup = BeautifulSoup(page.text, 'html.parser')
-    inp = soup.find('input', {'name': '__RequestVerificationToken'})
-    form_token = inp.get('value', '') if inp else ''
-    res = session.post(
-        'https://www.cpbl.com.tw/team/teamscoreaction',
-        headers={'User-Agent': UA, 'x-requested-with': 'XMLHttpRequest',
-                 'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                 'origin': 'https://www.cpbl.com.tw', 'referer': base_url},
-        data={'__RequestVerificationToken': form_token, 'ClubNo': team_code,
-              'ExecAction': '', 'IndexOfPages': '0', 'Sortby': '',
-              'KindCode': 'A', 'Year': str(year), 'Position': '01'},
-        timeout=20,
-    )
-    soup2 = BeautifulSoup(res.text, 'html.parser')
+# ── rebas.tw 打者標準數據（取代 CPBL 官網爬蟲）────────────────────────────
+def scrape_rebas_standard(year):
+    url = (f'https://www.rebas.tw/api/seasons/CPBL-{year}-oB/leaders'
+           f'?type=batter&section=standard&pa=undefined')
+    try:
+        res = requests.get(url, headers={'User-Agent': UA}, timeout=15)
+        if res.status_code != 200:
+            log.warning(f'rebas.tw standard HTTP {res.status_code}')
+            return []
+        data = res.json().get('data', [])
+    except Exception as e:
+        log.warning(f'rebas.tw standard 失敗：{e}')
+        return []
+
     rows = []
-    for row in soup2.select('table tr'):
-        player_td = row.select_one('td.sticky.player a')
-        num_tds = row.select('td.num')
-        if player_td and len(num_tds) >= 29:
-            name = player_td.text.strip()
-            if name in FAKE_PLAYERS:          # 過濾彙總/特殊列
-                continue
-            record = {'球員': name, '球隊': team_name, '年度': year}
-            for col, td in zip(COLUMNS, num_tds):
-                raw = td.text.strip()
-                if col in INT_COLS:
-                    val = re.sub(r'[^\d]', '', raw)
-                    record[col] = int(val) if val else 0
-                else:
-                    val = re.sub(r'[^\d.]', '', raw)
-                    record[col] = float(val) if val else 0.0
-            rows.append(record)
+    for p in data:
+        pl  = p['player']
+        g   = int(p.get('games') or 0)
+        pa  = int(p.get('PA') or 0)
+        ab  = int(p.get('AB') or 0)
+        h   = int(p.get('H') or 0)
+        h2b = int(p.get('Double') or 0)
+        h3b = int(p.get('Triple') or 0)
+        hr  = int(p.get('HR') or 0)
+        h1b = max(0, h - h2b - h3b - hr)
+        tb  = h1b + 2*h2b + 3*h3b + 4*hr
+        bb  = int(p.get('BB') or 0)
+        ibb = int(p.get('IBB') or 0)
+        hbp = int(p.get('HBP') or 0)
+        sf  = int(p.get('SF') or 0)
+        sac = int(p.get('SH') or 0)
+        so  = int(p.get('SO') or 0)
+        rbi = int(p.get('RBI') or 0)
+        r   = int(p.get('R') or 0)
+        sb  = int(p.get('SB') or 0)
+        cs  = int(p.get('CS') or 0)
+        gidp = int(p.get('GIDP') or 0)
+        avg = float(p.get('AVG') or 0)
+
+        obp_d = ab + bb + hbp + sf
+        obp   = round((h + bb + hbp) / obp_d, 3) if obp_d else 0.0
+        slg   = round(tb / ab, 3) if ab else 0.0
+        ops   = round(obp + slg, 3)
+        sb_pct = round(sb / (sb + cs), 3) if (sb + cs) else 0.0
+
+        rows.append({
+            '球員': pl['name'],
+            '球隊': TEAM_ABBR_MAP.get(pl.get('team_abbr', ''), pl.get('team_abbr', '')),
+            '年度': year,
+            'g': g, 'pa': pa, 'ab': ab,
+            'rbi': rbi, 'r': r, 'h': h,
+            '1B': h1b, '2B': h2b, '3B': h3b, 'hr': hr, 'tb': tb,
+            'so': so, 'sb': sb,
+            'obp': obp, 'slg': slg, 'avg': avg, 'ops': ops,
+            'gidp': gidp, 'sac': sac, 'sf': sf,
+            'bb': bb, 'ibb': ibb, 'hbp': hbp, 'cs': cs,
+            'go': 0, 'ao': 0, 'GO/AO': 0.0, 'SB%': sb_pct,
+        })
+    log.info(f'rebas.tw standard {year}：{len(rows)} 位打者')
     return rows
 
 
@@ -241,38 +251,27 @@ def main():
     target_year = int(sys.argv[1]) if len(sys.argv) > 1 else datetime.now().year
     log.info(f'===== CPBL Daily Update 開始 ({target_year} 年) =====')
 
-    # 1. CPBL 爬蟲
-    session = requests.Session()
-    all_rows = []
-    for code, name in TEAMS.items():
-        log.info(f'爬取 {target_year} {name}...')
-        try:
-            rows = scrape_team_year(session, code, name, target_year)
-            all_rows.extend(rows)
-            log.info(f'  → {len(rows)} 位球員')
-        except Exception as e:
-            log.error(f'  → 失敗：{e}')
-        sleep(1.2)
-
+    # 1. rebas.tw 標準打擊數據（全聯盟）
+    all_rows = scrape_rebas_standard(target_year)
     if not all_rows:
-        log.error('CPBL 爬蟲全部失敗，中止')
-        return
+        log.error('rebas.tw standard 資料為空，中止')
+        raise RuntimeError('rebas.tw standard 抓取失敗')
 
     df = pd.DataFrame(all_rows)
     df = compute_stats(df)
     df = compute_wrc_plus(df)
 
-    # 2. rebas.tw 合併（僅當年度有資料）
+    # 2. rebas.tw 進階指標合併
     df_rebas = scrape_rebas(target_year)
     if not df_rebas.empty:
         df = df.merge(df_rebas, on=['球員', '年度'], how='left')
-        log.info(f'rebas.tw 合併：{len(df_rebas)} 筆')
+        log.info(f'rebas.tw advanced/new 合併：{len(df_rebas)} 筆')
 
     # 3. 存入 Supabase
     sb = create_client(SUPABASE_URL, SUPABASE_KEY)
     upsert_year(sb, target_year, df)
 
-    # 4. 每日追蹤（逐場紀錄）
+    # 4. 每日追蹤（逐場紀錄，使用 CPBL 官網；從海外 IP 可能失敗但不中斷主流程）
     gamelog_dir = os.path.join(os.path.dirname(__file__), '每日追蹤')
     if os.path.exists(os.path.join(gamelog_dir, 'run_daily.py')):
         log.info('執行 每日追蹤/run_daily.py...')
@@ -285,6 +284,7 @@ def main():
             log.error(f'每日追蹤失敗：{e}')
 
     log.info(f'===== Daily Update 完成 =====\n')
+    return True
 
 
 if __name__ == '__main__':

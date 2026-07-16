@@ -74,10 +74,10 @@ def main():
         import io, contextlib
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            daily_update.main()
+            result = daily_update.main()
         output = buf.getvalue()
         print(output)
-        batting_updated = True   # 打者累計數據已寫入 Supabase
+        batting_updated = (result is True)   # main() 只有成功寫入 Supabase 才回傳 True
 
         # 從 stdout 解析逐場更新數字（run_daily.py 用 print，可被捕捉）
         for line in output.splitlines():
