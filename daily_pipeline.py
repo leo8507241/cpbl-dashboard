@@ -369,9 +369,10 @@ def main():
             lin_li_total_games = len(rows_lin)
             lin_li_latest_date = max(r["date"] for r in rows_lin) if rows_lin else ""
 
-        # 推送至 cpbl-dashboard
+        # 推送至 cpbl-dashboard（HF_TOKEN 由 GitHub Actions env 注入）
         from huggingface_hub import HfApi
-        hf_api = HfApi()
+        hf_token = os.environ.get("HF_TOKEN")
+        hf_api = HfApi(token=hf_token) if hf_token else HfApi()
         hf_dir = os.path.join(lin_li_dir, "hf_space")
         import shutil
         shutil.copy(cache_path, os.path.join(hf_dir, "lin_li_games_cache.csv"))
