@@ -61,36 +61,40 @@ def main():
     time_van  = datetime.now(tz_van).strftime("%Y-%m-%d %H:%M")
 
     errors = []
-    report_lines = []
 
     # ─── ① 打者累計 + 每日追蹤逐場 ──────────────────────────────
     print("\n" + "="*55)
     print("① 打者累計數據 & 逐場追蹤")
     print("="*55)
-    new_batting_rows = 0
+    batting_updated  = False
     new_games        = 0
     new_matchup_rows = 0
     try:
         import daily_update
-        # daily_update.main() 內部已呼叫 run_daily.py
-        # 捕捉 stdout 以取得更新數字
         import io, contextlib
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             daily_update.main()
         output = buf.getvalue()
         print(output)
+        batting_updated = True   # 打者累計數據已寫入 Supabase
 
-        # 從 stdout 解析更新數字
+        # 從 stdout 解析逐場更新數字（run_daily.py 用 print，可被捕捉）
         for line in output.splitlines():
             if "打者逐場資料：新增" in line:
-                parts = line.split("新增")[1].split("場")
-                new_games = int(parts[0].strip().replace("，", "").replace(",", ""))
-            if "新增" in line and "筆打者紀錄" in line:
-                pass  # 從 run_daily 輸出不易解析，忽略
-            if "打席對戰紀錄：新增" in line and "筆" in line:
                 try:
-                    new_matchup_rows = int(line.split("、")[1].split("筆")[0].strip())
+                    new_games = int(
+                        line.split("新增")[1].split("場")[0]
+                        .strip().replace("，", "").replace(",", "")
+                    )
+                except Exception:
+                    pass
+            if "對戰紀錄：新增" in line or "打席對戰紀錄：新增" in line:
+                try:
+                    new_matchup_rows = int(
+                        line.split("新增")[1].split("場")[0]
+                        .strip().replace("，", "").replace(",", "")
+                    )
                 except Exception:
                     pass
     except Exception as e:
@@ -121,7 +125,8 @@ def main():
         print(f"⚠️  投手逐球更新失敗：{e}")
 
     # ─── 組報告 ──────────────────────────────────────────────────
-    no_update = (new_games == 0 and pitch_new_rows == 0 and not errors)
+    # batting_updated=True 代表打者累計數據每日都有寫入 Supabase，不算「無更新」
+    no_update = (not batting_updated and pitch_new_rows == 0 and not errors)
 
     if no_update:
         msg = (
@@ -138,10 +143,13 @@ def main():
         ]
 
         # ① 打者資料
-        if new_games > 0 or new_matchup_rows > 0:
+        if batting_updated:
             lines.append("【打者資料更新】")
+            lines.append("  ✅ 累計打擊數據：已同步至 Supabase")
             if new_games > 0:
                 lines.append(f"  ⚾ 逐場比賽記錄：新增 {new_games} 場")
+            else:
+                lines.append("  ⚾ 逐場比賽記錄：今日無新場次（或 CPBL 官網未回應）")
             if new_matchup_rows > 0:
                 lines.append(f"  📋 打席對戰紀錄：新增 {new_matchup_rows:,} 筆")
             lines.append("  → 影響頁面：被低估打者預測、打者趨勢雷達、")
