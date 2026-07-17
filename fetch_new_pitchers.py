@@ -1,9 +1,12 @@
 """
-抓取 2026 新增投手的逐球資料並合併至 pitcher_pitches.csv
+抓取 2026 新增投手的逐球資料，並對現有投手做 2026 增量更新，合併至 pitcher_pitches.csv
 
-條件：
-  先發 ≥ 5 場  OR  牛棚 ≥ 10 場（2026年）
+條件（新投手）：
+  先發 ≥ 2 場  OR  牛棚 ≥ 6 場（2026年）
   且尚未在 pitcher_pitches.csv 中
+
+增量更新（現有投手）：
+  只抓 2026 賽季中比該投手在 CSV 最新 game_date 更新的場次
 
 資料來源：rebas.tw（野球革命），涵蓋 2023–2026 年。
 
@@ -194,25 +197,32 @@ def main(dry_run=False):
     qual    = qualifying_pitchers(leaders)
     print(f"2026 符合資格的投手：{len(qual)} 位（先發≥{STARTER_MIN_GS} 或 牛棚≥{RELIEVER_MIN_RP}）")
 
-    new_pitchers = [p for p in qual if p["uid"] not in existing_uids]
-    print(f"需要新增：{len(new_pitchers)} 位\n")
+    new_pitchers      = [p for p in qual if p["uid"] not in existing_uids]
+    existing_pitchers = [p for p in qual if p["uid"] in existing_uids]
+    print(f"需要新增：{len(new_pitchers)} 位，需增量更新：{len(existing_pitchers)} 位\n")
     for p in new_pitchers:
         role = f"先發{p['gs']}場" if p['gs'] >= STARTER_MIN_GS else f"牛棚{p['rp']}場"
-        print(f"  {p['name']}（{p['team']}）{role}  uid={p['uid']}")
+        print(f"  [新] {p['name']}（{p['team']}）{role}  uid={p['uid']}")
+
+    # 計算每位現有投手在 2026 的最新 game_date（用於增量過濾）
+    latest_2026 = {}
+    if not existing.empty and "game_date" in existing.columns and "year" in existing.columns:
+        e2026 = existing[existing["year"].astype(str) == "2026"]
+        if not e2026.empty:
+            ld = e2026.groupby("pitcher_uid")["game_date"].max()
+            latest_2026 = ld.to_dict()
 
     if dry_run:
         print("\n--dry-run 模式，不實際抓取資料。")
         return
 
-    if not new_pitchers:
-        print("沒有需要新增的投手，結束。")
-        return
-
     all_new_rows = []
+
+    # ── 新投手：抓全年度歷史資料 ──────────────────────────────────────
     for pi, pitcher in enumerate(new_pitchers, 1):
         name = pitcher["name"]
         uid  = pitcher["uid"]
-        print(f"\n[{pi}/{len(new_pitchers)}] {name} (uid={uid})")
+        print(f"\n[新增 {pi}/{len(new_pitchers)}] {name} (uid={uid})")
 
         for season_uid, year in SEASONS:
             print(f"  抓取 {year} ({season_uid})...", end=" ", flush=True)
@@ -225,6 +235,38 @@ def main(dry_run=False):
             print(f"{len(games)} 場賽事，{len(rows)} 球")
             all_new_rows.extend(rows)
             time.sleep(0.4)
+
+    # ── 現有投手：只抓 2026 中比最新 game_date 更新的場次 ────────────
+    SEASON_2026 = "CPBL-2026-oB"
+    updated_pitchers = []
+    for pi, pitcher in enumerate(existing_pitchers, 1):
+        name      = pitcher["name"]
+        uid       = pitcher["uid"]
+        last_date = latest_2026.get(uid, "")
+        print(f"\n[更新 {pi}/{len(existing_pitchers)}] {name} (uid={uid}, 2026最新={last_date or '無'})",
+              end=" ", flush=True)
+        games = fetch_season_logs(uid, SEASON_2026)
+        if not games:
+            print("（無資料）")
+            time.sleep(0.3)
+            continue
+
+        new_games = [g for g in games if (g.get("date") or "")[:10] > last_date] if last_date else games
+        if not new_games:
+            print("— 無新場次")
+            time.sleep(0.2)
+            continue
+
+        rows = logs_to_rows(name, uid, SEASON_2026, 2026, new_games)
+        print(f"→ 新增 {len(new_games)} 場，{len(rows)} 球")
+        all_new_rows.extend(rows)
+        updated_pitchers.append({
+            "name":       name,
+            "team":       pitcher["team"],
+            "rows":       len(rows),
+            "date_range": f"{new_games[0].get('date','')[:10]}–{new_games[-1].get('date','')[:10]}",
+        })
+        time.sleep(0.4)
 
     if not all_new_rows:
         print("\n沒有抓到任何新資料。")
@@ -240,9 +282,8 @@ def main(dry_run=False):
     combined = pd.concat([existing, new_df], ignore_index=True)
     combined.to_csv(CSV_PATH, index=False)
     print(f"\n完成！新增 {len(new_df):,} 筆，合計 {len(combined):,} 筆 → {CSV_PATH}")
-    print(f"投手清單：{sorted(combined['pitcher'].unique())}")
 
-    # 整理每位新投手的統計（供報告用）
+    # 整理新投手統計（供報告用）
     pitcher_summary = []
     for p in new_pitchers:
         sub = new_df[new_df["pitcher_uid"] == p["uid"]]
@@ -255,6 +296,7 @@ def main(dry_run=False):
             "rows":       len(sub),
             "date_range": date_range,
         })
+    pitcher_summary.extend(updated_pitchers)
 
     return {"new_rows": len(new_df), "pitchers": pitcher_summary}
 

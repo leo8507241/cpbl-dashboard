@@ -100,21 +100,31 @@ def _snapshot_batting(sb, year):
 
 
 def _snapshot_gamelog(sb, year):
-    """逐場記錄：最新場次日期、總筆數。"""
-    rows = _q(sb, "cpbl_batter_game_log", "date", {"year": year})
-    if not rows:
+    """逐場記錄：最新場次日期、總筆數（使用 count="exact" 繞過 1,000 筆限制）。"""
+    try:
+        q_count = sb.table("cpbl_batter_game_log").select("*", count="exact").eq("year", year)\
+                    .limit(1).execute()
+        total = q_count.count or 0
+        q_date = sb.table("cpbl_batter_game_log").select("date").eq("year", year)\
+                   .order("date", desc=True).limit(1).execute()
+        latest = q_date.data[0]["date"] if q_date.data else None
+        return {"latest": latest, "total": total}
+    except Exception:
         return {"latest": None, "total": 0}
-    dates = [r["date"] for r in rows if r.get("date")]
-    return {"latest": max(dates) if dates else None, "total": len(rows)}
 
 
 def _snapshot_matchup(sb, year):
-    """對戰紀錄：最新日期、總打席數。"""
-    rows = _q(sb, "cpbl_matchup_log", "date", {"year": year})
-    if not rows:
+    """對戰紀錄：最新日期、總打席數（使用 count="exact" 繞過 1,000 筆限制）。"""
+    try:
+        q_count = sb.table("cpbl_matchup_log").select("*", count="exact").eq("year", year)\
+                    .limit(1).execute()
+        total = q_count.count or 0
+        q_date = sb.table("cpbl_matchup_log").select("date").eq("year", year)\
+                   .order("date", desc=True).limit(1).execute()
+        latest = q_date.data[0]["date"] if q_date.data else None
+        return {"latest": latest, "total": total}
+    except Exception:
         return {"latest": None, "total": 0}
-    dates = [r["date"] for r in rows if r.get("date")]
-    return {"latest": max(dates) if dates else None, "total": len(rows)}
 
 
 def _snapshot_pitcher_csv():
@@ -128,12 +138,17 @@ def _snapshot_pitcher_csv():
 
 
 def _snapshot_fatigue(sb):
-    """投手疲勞分析資料：最新日期、筆數。"""
-    rows = _q(sb, "cpbl_intra_game_checkpoints", "game_date")
-    if not rows:
+    """投手疲勞分析資料：最新日期、筆數（使用 count="exact" 繞過 1,000 筆限制）。"""
+    try:
+        q_count = sb.table("cpbl_intra_game_checkpoints").select("*", count="exact")\
+                    .limit(1).execute()
+        total = q_count.count or 0
+        q_date = sb.table("cpbl_intra_game_checkpoints").select("game_date")\
+                   .order("game_date", desc=True).limit(1).execute()
+        latest = q_date.data[0]["game_date"] if q_date.data else None
+        return {"latest": latest, "total": total}
+    except Exception:
         return {"latest": None, "total": 0}
-    dates = [r["game_date"] for r in rows if r.get("game_date")]
-    return {"latest": max(dates) if dates else None, "total": len(rows)}
 
 
 def take_snapshot(year):
