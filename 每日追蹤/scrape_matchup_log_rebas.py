@@ -35,6 +35,8 @@ FIELDS = [
 ]
 
 SEASONS = [
+    ("CPBL-2023-sk", 2023),
+    ("CPBL-2024-xa", 2024),
     ("CPBL-2025-JO", 2025),
     ("CPBL-2026-oB", 2026),
 ]
@@ -145,7 +147,7 @@ def _parse_game(g, pitcher_uid, pitcher_name, pitcher_team, year):
 
 def main(start_year=None, end_year=None):
     from datetime import datetime
-    start_year = start_year or 2025
+    start_year = start_year or 2023   # 涵蓋 rebas.tw 最早可回溯的 2023 年
     end_year   = end_year   or datetime.now().year
 
     cache = common.load_cache(CACHE_PATH, key_fields=["year", "game_sno", "main_event_no"])
