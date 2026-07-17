@@ -18,6 +18,7 @@ from supabase import create_client
 
 SAMPLE_RAMP_FULL_AT = 12
 PA_BASED_METRICS = {"ops_against", "iso_against", "fip_overlap", "fb_traj_pct", "deep_fly_pct"}
+BASELINE_GAMES = 10  # 跟intra_game_fatigue.py的BASELINE_GAMES同義，這裡不import整個模組，直接複製常數
 WEIGHTS_WITH_OVERLAP = {
     "velocity": 0.20, "rpm": 0.10, "csw_all": 0.15,
     "ops_against": 0.15, "iso_against": 0.10, "fip_overlap": 0.15,

@@ -36,6 +36,12 @@ NOT_AB_TYPES = WALK_TYPES | {"HBP", "SF", "SF_E", "SH", "SH_E", "SH_FC"}
 SAMPLE_RAMP_FULL_AT = 12
 PA_BASED_METRICS = {"ops_against", "iso_against", "fip_overlap", "fb_traj_pct", "deep_fly_pct"}
 
+# 基準線用該球季「前BASELINE_GAMES場」的最終累計數據算中位數/MAD。CPBL先發輪值淺，很多投手
+# (尤其中途加盟/被下放的洋將)整季先發數就<=10場——這代表這個窗口內的分數，基準值會包含「這場
+# 自己」或「這場之後才發生」的比賽，不是嚴格意義下的事前基準，只有game_rank>BASELINE_GAMES的
+# 場次才是用完全獨立於自己的過去10場當基準。dashboard要對這兩種情況分開標示，見compute_game_rank()。
+BASELINE_GAMES = 10
+
 WORSE_WHEN_LOW = {"velocity", "rpm", "csw_all", "csw_fb", "csw_br", "k_pct"}
 
 WEIGHTS_WITH_OVERLAP = {
@@ -111,7 +117,7 @@ def compute_pitch_type_checkpoints(pitch_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def build_pitch_type_baseline(pt_checkpoints: pd.DataFrame, baseline_games: int = 10) -> pd.DataFrame:
+def build_pitch_type_baseline(pt_checkpoints: pd.DataFrame, baseline_games: int = BASELINE_GAMES) -> pd.DataFrame:
     """每位投手、每個球種，用該球季前 baseline_games 場出賽的「整場最終」數據，
     算球速/轉速中位數+MAD，以及這個球種在正常情況下的使用率(球季正常球種配比，不受單場戰術調整影響)。"""
     max_inning = pt_checkpoints.groupby(["pitcher_uid", "game_date"])["inning"].transform("max")
@@ -242,7 +248,7 @@ def compute_inning_checkpoints(pitch_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def build_season_baseline(checkpoint_df: pd.DataFrame, metrics: list[str], baseline_games: int = 10) -> pd.DataFrame:
+def build_season_baseline(checkpoint_df: pd.DataFrame, metrics: list[str], baseline_games: int = BASELINE_GAMES) -> pd.DataFrame:
     """每位投手「這個球季」單一一組基準值(不分局數，球速/轉速不在這裡算，見 build_pitch_type_baseline)，
     用該球季前 baseline_games 場出賽的「整場最終累計數據」算中位數+MAD。"""
     max_inning = checkpoint_df.groupby(["pitcher_uid", "game_date"])["inning"].transform("max")
@@ -258,6 +264,19 @@ def build_season_baseline(checkpoint_df: pd.DataFrame, metrics: list[str], basel
         agg[f"{m}_spread"] = (m, _mad)
     grouped = first_n.groupby(["pitcher_uid", "year"]).agg(**agg).reset_index()
     return grouped
+
+
+def compute_game_rank(checkpoint_df: pd.DataFrame) -> pd.Series:
+    """每一列所屬的那一場，在該投手當季所有先發裡是第幾場(按game_date由早到晚排，dense rank)。
+    game_rank<=BASELINE_GAMES的場次，基準值(build_season_baseline用同一套排序邏輯選出的
+    「前BASELINE_GAMES場」)會包含這場自己或比這場更晚的比賽，不是嚴格事前基準；
+    game_rank>BASELINE_GAMES才是完全獨立於自己的過去基準。用來讓dashboard標示這場分數的
+    基準可信度，回傳值跟checkpoint_df同索引對齊。"""
+    keys = checkpoint_df[["pitcher_uid", "year", "game_date"]].drop_duplicates().sort_values(
+        ["pitcher_uid", "year", "game_date"])
+    keys["baseline_game_rank"] = keys.groupby(["pitcher_uid", "year"])["game_date"].rank(method="dense").astype(int)
+    merged = checkpoint_df.merge(keys, on=["pitcher_uid", "year", "game_date"], how="left")
+    return merged["baseline_game_rank"]
 
 
 def compute_deviations(checkpoint_df: pd.DataFrame, baseline_df: pd.DataFrame, metrics: list[str],
@@ -326,8 +345,8 @@ if __name__ == "__main__":
                    "fb_traj_pct", "deep_fly_pct"]
 
     print("建立個人球季基準線(不分局數，用該季前10場出賽的最終累計數據)...")
-    baseline = build_season_baseline(checkpoints, metrics_all, baseline_games=10)
-    pt_baseline = build_pitch_type_baseline(pt_checkpoints, baseline_games=10)
+    baseline = build_season_baseline(checkpoints, metrics_all, baseline_games=BASELINE_GAMES)
+    pt_baseline = build_pitch_type_baseline(pt_checkpoints, baseline_games=BASELINE_GAMES)
 
     print("計算偏離程度...")
     dev = compute_deviations(checkpoints, baseline, metrics_all, join_keys=["pitcher_uid", "year"])
@@ -340,6 +359,7 @@ if __name__ == "__main__":
 
     dev["score_with_overlap"] = compute_change_score(dev, WEIGHTS_WITH_OVERLAP)
     dev["score_dedup"] = compute_change_score(dev, WEIGHTS_DEDUPLICATED)
+    dev["baseline_game_rank"] = compute_game_rank(dev)
 
     dev.to_csv("intra_game_checkpoints_scored.csv", index=False)
     pt_checkpoints.merge(pt_baseline, on=["pitcher_uid", "year", "pitch_type"], how="left").to_csv(

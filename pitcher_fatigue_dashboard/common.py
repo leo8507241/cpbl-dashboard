@@ -96,8 +96,8 @@ def _compute_intra_game_checkpoints_locally() -> pd.DataFrame:
     checkpoints = igf.compute_inning_checkpoints(starter_pitch_df)
     pt_checkpoints = igf.compute_pitch_type_checkpoints(starter_pitch_df)
 
-    baseline = igf.build_season_baseline(checkpoints, INTRA_GAME_METRICS, baseline_games=10)
-    pt_baseline = igf.build_pitch_type_baseline(pt_checkpoints, baseline_games=10)
+    baseline = igf.build_season_baseline(checkpoints, INTRA_GAME_METRICS, baseline_games=igf.BASELINE_GAMES)
+    pt_baseline = igf.build_pitch_type_baseline(pt_checkpoints, baseline_games=igf.BASELINE_GAMES)
 
     dev = igf.compute_deviations(checkpoints, baseline, INTRA_GAME_METRICS, join_keys=["pitcher_uid", "year"])
     v_dev = igf.compute_pitch_weighted_deviation(pt_checkpoints, pt_baseline)
@@ -107,6 +107,7 @@ def _compute_intra_game_checkpoints_locally() -> pd.DataFrame:
 
     dev["score_with_overlap"] = igf.compute_change_score(dev, igf.WEIGHTS_WITH_OVERLAP)
     dev["score_dedup"] = igf.compute_change_score(dev, igf.WEIGHTS_DEDUPLICATED)
+    dev["baseline_game_rank"] = igf.compute_game_rank(dev)
     return dev
 
 

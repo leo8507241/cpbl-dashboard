@@ -47,16 +47,31 @@ if game_df.empty:
     st.info("這場沒有資料。")
     st.stop()
 
+game_rank = int(game_df["baseline_game_rank"].iloc[0]) if "baseline_game_rank" in game_df.columns else None
+if game_rank is not None:
+    if game_rank <= igf.BASELINE_GAMES:
+        st.warning(
+            f"⚠️ 基準形成中：這是{pitcher}本季第{game_rank}場先發(基準線用前{igf.BASELINE_GAMES}場)，"
+            f"基準值會包含這場自己、或是比這場更晚才發生的比賽，不是嚴格意義下的「事前」基準，"
+            f"分數的參考價值請打折看待。要等第{igf.BASELINE_GAMES + 1}場以後，基準才是完全獨立於這場的過去資料。"
+        )
+    else:
+        st.success(f"✅ 基準已固定：這是{pitcher}本季第{game_rank}場先發，基準值只用完全發生在這場之前的資料，比較可信。")
+
 
 GOOD, WARN, CRIT = (0x0c, 0xa3, 0x0c), (0xfa, 0xb2, 0x19), (0xd0, 0x3b, 0x3b)
 
 
 def color_for_prob(prob: float) -> str:
-    """機率0->GOOD，0.5->WARN，1->CRIT，中間線性內插，畫成連續漸層而非3段死區間。"""
-    if prob <= 0.5:
-        c0, c1, t = GOOD, WARN, prob / 0.5
+    """機率0->GOOD，0.3->WARN，0.6->CRIT，中間線性內插，畫成連續漸層而非3段死區間。
+    轉換點對齊zone_for_prob()的30%/60%門檻(不是寫死0.5)，不然色帶在文字標籤已經寫
+    「一定要換」(60%)的地方，顏色還停留在偏黃橘、看起來不夠紅，跟文字警示程度對不起來。"""
+    if prob <= 0.3:
+        c0, c1, t = GOOD, WARN, prob / 0.3
+    elif prob <= 0.6:
+        c0, c1, t = WARN, CRIT, (prob - 0.3) / 0.3
     else:
-        c0, c1, t = WARN, CRIT, (prob - 0.5) / 0.5
+        c0, c1, t = CRIT, CRIT, 0.0
     r = round(c0[0] + (c1[0] - c0[0]) * t)
     g = round(c0[1] + (c1[1] - c0[1]) * t)
     b = round(c0[2] + (c1[2] - c0[2]) * t)

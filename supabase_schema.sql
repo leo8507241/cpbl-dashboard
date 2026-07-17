@@ -10,6 +10,9 @@
 -- RLS policy 設定這6張新表，不然 sync 腳本的 insert/delete 會被拒絕。
 -- ============================================================================
 
+-- migration: 如果6張表已經建過(第一次sync已成功)，只需要單獨補這一行，不用整份重跑：
+--   alter table cpbl_intra_game_checkpoints add column if not exists baseline_game_rank integer;
+
 -- 1. 原始逐球資料（pitcher_pitches.csv 全量）
 create table if not exists cpbl_pitcher_pitches (
     id bigint generated always as identity primary key,
@@ -131,6 +134,7 @@ create table if not exists cpbl_intra_game_checkpoints (
     rpm_weighted_baseline double precision,
     score_with_overlap double precision,
     score_dedup double precision,
+    baseline_game_rank integer,
     unique (pitcher_uid, game_date, inning)
 );
 create index if not exists idx_checkpoints_pitcher_game on cpbl_intra_game_checkpoints(pitcher_uid, game_date);

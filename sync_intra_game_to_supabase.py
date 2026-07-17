@@ -140,8 +140,8 @@ def build_intra_game_pipeline(df: pd.DataFrame):
     pt_checkpoints = igf.compute_pitch_type_checkpoints(sdf)
 
     print("建立個人球季基準線...")
-    baseline = igf.build_season_baseline(checkpoints, METRICS_ALL, baseline_games=10)
-    pt_baseline = igf.build_pitch_type_baseline(pt_checkpoints, baseline_games=10)
+    baseline = igf.build_season_baseline(checkpoints, METRICS_ALL, baseline_games=igf.BASELINE_GAMES)
+    pt_baseline = igf.build_pitch_type_baseline(pt_checkpoints, baseline_games=igf.BASELINE_GAMES)
 
     print("計算偏離程度...")
     dev = igf.compute_deviations(checkpoints, baseline, METRICS_ALL, join_keys=["pitcher_uid", "year"])
@@ -154,6 +154,9 @@ def build_intra_game_pipeline(df: pd.DataFrame):
 
     dev["score_with_overlap"] = igf.compute_change_score(dev, igf.WEIGHTS_WITH_OVERLAP)
     dev["score_dedup"] = igf.compute_change_score(dev, igf.WEIGHTS_DEDUPLICATED)
+    # game_rank<=BASELINE_GAMES的場次，基準值包含自己或未來比賽，不是嚴格事前基準——
+    # dashboard要用這個標示分數可信度，見intra_game_fatigue.compute_game_rank()的說明。
+    dev["baseline_game_rank"] = igf.compute_game_rank(dev)
 
     pt_detail = pt_checkpoints.merge(pt_baseline, on=["pitcher_uid", "year", "pitch_type"], how="left")
     return dev, pt_detail
