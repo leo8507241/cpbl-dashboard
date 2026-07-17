@@ -62,10 +62,25 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+# rebas.tw 每個賽季的正確 UID（各年度尾綴不同，不能用 oB 統一替代）
+SEASON_UID_MAP = {
+    2023: "CPBL-2023-sk",
+    2024: "CPBL-2024-xa",
+    2025: "CPBL-2025-JO",
+    2026: "CPBL-2026-oB",
+}
+
+
+def _season_uid(year: int) -> str:
+    uid = SEASON_UID_MAP.get(year)
+    if uid is None:
+        raise ValueError(f"未知的賽季 UID：{year}，請更新 SEASON_UID_MAP")
+    return uid
+
 
 # ── rebas.tw 打者標準數據（取代 CPBL 官網爬蟲）────────────────────────────
 def scrape_rebas_standard(year):
-    url = (f'https://www.rebas.tw/api/seasons/CPBL-{year}-oB/leaders'
+    url = (f'https://www.rebas.tw/api/seasons/{_season_uid(year)}/leaders'
            f'?type=batter&section=standard&pa=undefined')
     try:
         res = requests.get(url, headers={'User-Agent': UA}, timeout=15)
@@ -128,7 +143,7 @@ def scrape_rebas_standard(year):
 # ── rebas.tw 進階指標 ──────────────────────────────────────────────────────
 def scrape_rebas(year):
     def _fetch(section):
-        url = (f'https://www.rebas.tw/api/seasons/CPBL-{year}-oB/leaders'
+        url = (f'https://www.rebas.tw/api/seasons/{_season_uid(year)}/leaders'
                f'?type=batter&section={section}&pa=undefined')
         try:
             res = requests.get(url, headers={'User-Agent': UA}, timeout=15)

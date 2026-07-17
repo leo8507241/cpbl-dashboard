@@ -144,8 +144,8 @@ def build_player_summary(year_df, rolling_n, official_lookup):
 st.set_page_config(page_title='打者趨勢雷達', layout='wide')
 st.title('📈 打者趨勢雷達')
 st.caption(
-    '資料來源：每天從 CPBL 官網逐場 boxscore API（box/getlive）一場一場抓，'
-    '不是看官網排行榜，是每位打者「每一場」的計數型數據（打數、安打、保送…），累加起來才變成下面的統計。'
+    '資料來源：rebas.tw（野球革命）逐場打擊 API，每天自動更新，'
+    '不是看排行榜，是每位打者「每一場」的計數型數據（打數、安打、保送…），累加起來才變成下面的統計。'
 )
 
 df = load_gamelog()
