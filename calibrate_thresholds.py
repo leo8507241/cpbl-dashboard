@@ -11,6 +11,13 @@
 單獨執行(python calibrate_thresholds.py)會從 intra_game_checkpoints_scored.csv 讀資料、
 存3個校準CSV。sync_intra_game_to_supabase.py 會直接呼叫 compute_calibration() 重用同一份
 邏輯，不用另外讀寫CSV。
+
+資料截斷偵測(detect_truncated_starts)：實測發現原始逐球資料裡，少數投手(2026-07查出13位，
+包含鋼龍/布雷克/艾速特等主力洋將)有極高比例(64%~100%)的先發「剛好」都停在同一局(幾乎都是
+第3局)，遠超過真實換投決策該有的分散程度(換投時機該隨對手/戰況每場不同)，判斷是這些投手的
+部分歷史逐球紀錄本身就沒抓完整(截斷)，不是教練真的都在那一局換投。這種場次的「最後一局」
+removed_after標記不可信(可能繼續投也可能真的換了，資料無法判斷)，但截斷之前的局數資料
+(球速/轉速/戰績累計)本身是真的，予以保留，只排除最後那一局的removed_after標記。
 """
 import numpy as np
 import pandas as pd
@@ -19,6 +26,45 @@ from sklearn.isotonic import IsotonicRegression
 SCORE_GRID = np.arange(0, 101, 2)
 MIN_SAMPLE = 100
 
+TRUNCATION_CONCENTRATION_THRESHOLD = 0.6  # 單一投手的先發，>=60%都結束在同一局，判定為截斷
+TRUNCATION_MIN_STARTS = 10                # 場次太少統計不穩定，先發數<10的不列入偵測
+
+
+def detect_truncated_starts(checkpoint_df: pd.DataFrame, concentration_threshold: float = TRUNCATION_CONCENTRATION_THRESHOLD,
+                             min_starts: int = TRUNCATION_MIN_STARTS) -> set[tuple]:
+    """偵測「同一位投手，異常大比例的先發都剛好結束在同一局」的模式。
+    真實換投決策應該隨每場比賽的對手/戰況不同而分散在不同局數；如果某位投手有超過
+    concentration_threshold比例的先發都精準停在同一局，統計上不太可能是真實決策造成的，
+    更可能是那個局數之後的逐球資料沒被抓完整。回傳 {(pitcher_uid, game_date, inning), ...}
+    這組(場次,局數)的removed_after標記不可信，應該從校準用的樣本裡排除。
+
+    反覆(iterative)偵測：排除第一層抓到的截斷場次後，同一位投手剩下的場次有時候會在
+    「下一個」局數又出現異常集中(例如某人先在第3局截斷一批，剩下的又有九成集中在第4局)，
+    代表截斷不只發生在單一局數。每輪只排掉當輪抓到的，重新檢查剩下的，直到抓不到新的
+    異常集中點為止，才能把連續截斷完整清乾淨。"""
+    max_inning = checkpoint_df.groupby(["pitcher_uid", "game_date"])["inning"].max().reset_index()
+    flagged = set()
+    remaining = max_inning.copy()
+
+    while True:
+        found_this_round = False
+        for uid, g in remaining.groupby("pitcher_uid"):
+            if len(g) < min_starts:
+                continue
+            vc = g["inning"].value_counts()
+            top_inning, top_count = vc.idxmax(), vc.max()
+            if top_count / len(g) >= concentration_threshold:
+                bad_rows = g[g["inning"] == top_inning]
+                for _, row in bad_rows.iterrows():
+                    flagged.add((row["pitcher_uid"], row["game_date"], top_inning))
+                found_this_round = True
+        if not found_this_round:
+            break
+        flagged_keys = {(uid, d) for uid, d, _ in flagged}
+        remaining = remaining[~remaining.apply(lambda r: (r["pitcher_uid"], r["game_date"]) in flagged_keys, axis=1)]
+
+    return flagged
+
 
 def compute_calibration(cp: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """輸入 intra_game_checkpoints_scored 同格式的DataFrame(需含score_with_overlap欄)，
@@ -26,6 +72,15 @@ def compute_calibration(cp: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, p
     cp = cp.sort_values(["pitcher_uid", "game_date", "inning"]).copy()
     cp["has_next_inning"] = cp.groupby(["pitcher_uid", "game_date"])["inning"].shift(-1).notna()
     cp["removed_after"] = (~cp["has_next_inning"]).astype(int)
+
+    truncated = detect_truncated_starts(cp)
+    if truncated:
+        mask = cp.apply(lambda r: (r["pitcher_uid"], r["game_date"], r["inning"]) in truncated, axis=1)
+        cp.loc[mask, "removed_after"] = np.nan
+        print(f"偵測到疑似資料截斷的場次-局數組合: {len(truncated)} 組，"
+              f"已從removed_after校準樣本排除(不影響球速/戰績等其他數據)")
+    cp = cp.dropna(subset=["removed_after"])
+    cp["removed_after"] = cp["removed_after"].astype(int)
 
     summary_rows, curve_rows, quartile_rows = [], [], []
     for inning in sorted(cp["inning"].unique()):
