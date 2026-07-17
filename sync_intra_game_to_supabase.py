@@ -78,21 +78,57 @@ def _clean_records(df: pd.DataFrame) -> list[dict]:
     return records
 
 
-def _replace_table(sb, table: str, df: pd.DataFrame, delete_filter: dict | None = None):
-    """刪掉符合條件的舊資料(沒給filter就整張表清空)，再分批插入新資料。每個request都包了重試，
-    寬欄位表(如cpbl_pitcher_pitches)偶爾會頂到Supabase的statement timeout，重試通常就過。"""
-    def _delete():
-        q = sb.table(table).delete()
+TABLES_WITHOUT_ID = {"cpbl_inning_fatigue_thresholds"}  # 用inning當PK，沒有獨立id欄位，資料量小(<10列)
+
+
+def _delete_matching(sb, table: str, delete_filter: dict | None):
+    """先分頁把符合條件的id查出來，再用id分小批刪除，避免一次刪掉幾萬筆頂到單一DELETE語句的
+    statement timeout(這張table越大、要刪的年份資料越多，越容易發生)。"""
+    if table in TABLES_WITHOUT_ID:
+        # 資料量小(cpbl_inning_fatigue_thresholds最多幾列)，一次刪除不會逾時，沒有id欄位可分批
+        def _delete_all():
+            q = sb.table(table).delete()
+            if delete_filter:
+                for col, val in delete_filter.items():
+                    q = q.eq(col, val)
+            else:
+                q = q.gte("inning", -1)
+            return q.execute()
+        _with_retry(_delete_all, f"{table} 清空舊資料")
+        return
+
+    def _build_select_query():
+        q = sb.table(table).select("id")
         if delete_filter:
             for col, val in delete_filter.items():
                 q = q.eq(col, val)
         else:
-            # PostgREST的delete要求至少一個filter。5張衍生表都保證有"inning"欄位(cpbl_pitcher_pitches
-            # 不會走這個分支，一定帶delete_filter)，用它當全部列永真的條件，不能沿用id(thresholds表沒有id欄位)。
-            q = q.gte("inning", -1)
-        return q.execute()
+            q = q.gte("id", 0)
+        return q
 
-    _with_retry(_delete, f"{table} 清空舊資料")
+    ids, page, start = [], 1000, 0
+    while True:
+        res = _with_retry(lambda s=start: _build_select_query().range(s, s + page - 1).execute(),
+                           f"{table} 查詢待刪除id({start}起)")
+        data = res.data
+        ids.extend(r["id"] for r in data)
+        if len(data) < page:
+            break
+        start += page
+
+    if not ids:
+        return
+    for i in range(0, len(ids), BATCH_SIZE):
+        batch_ids = ids[i:i + BATCH_SIZE]
+        _with_retry(lambda b=batch_ids: sb.table(table).delete().in_("id", b).execute(),
+                    f"{table} 刪除第{i}-{i + len(batch_ids)}筆舊資料")
+    print(f"    已清除 {table} 舊資料 {len(ids)} 筆")
+
+
+def _replace_table(sb, table: str, df: pd.DataFrame, delete_filter: dict | None = None):
+    """刪掉符合條件的舊資料(沒給filter就整張表清空)，再分批插入新資料。每個request都包了重試，
+    寬欄位表(如cpbl_pitcher_pitches)偶爾會頂到Supabase的statement timeout，重試通常就過。"""
+    _delete_matching(sb, table, delete_filter)
 
     records = _clean_records(df)
     n_batches = math.ceil(len(records) / BATCH_SIZE)
