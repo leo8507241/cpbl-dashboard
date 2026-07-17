@@ -214,7 +214,8 @@ def build_email(date_tp, time_van, year,
                 before, after,
                 batting_updated, pitch_new_rows, pitch_new_pitchers,
                 new_games, new_matchup_rows, errors,
-                lin_li_new_games=0, lin_li_total_games=0, lin_li_latest_date=""):
+                lin_li_new_games=0, lin_li_total_games=0, lin_li_latest_date="",
+                pitcher_csv_latest="", pitcher_csv_rows=0):
 
     lines = [
         "📊 CPBL 每日更新報告",
@@ -263,27 +264,25 @@ def build_email(date_tp, time_van, year,
     for l in _diff_pitcher(before.get("pitcher"), after.get("pitcher")):
         lines.append(l)
     if pitch_new_pitchers:
-        lines.append(f"  📌 新增投手（{len(pitch_new_pitchers)} 位）：")
+        lines.append(f"  📌 新增／更新（{len(pitch_new_pitchers)} 位）：")
         for p in pitch_new_pitchers:
             lines.append(f"     • {p['name']}（{p['team']}）"
                          f"  {p['rows']:,} 球  {p['date_range']}")
     lines.append("")
 
     # ⑤ 單場即時換投監控
+    # 注意：⑤ 的 Supabase 同步(sync_intra_game_to_supabase.py)在 email 寄出之後才跑，
+    # 所以用 pitcher_pitches.csv 的當前狀態反映更新結果，而不是查 Supabase 快照。
     lines.append("⑤ 單場即時換投監控")
-    lines.append(f"   資料源：pitcher_pitches.csv → 疲勞分數 → Supabase")
-    fa = after.get("fatigue")
-    fb = before.get("fatigue")
-    if fa:
-        fa_tot = fa.get("total", 0)
-        fb_tot = fb.get("total", 0) if fb else 0
-        added  = fa_tot - fb_tot
-        if added > 0:
-            lines.append(f"  ✅ 新增 {added:,} 筆，最新 {fa.get('latest')}")
+    lines.append(f"   資料源：pitcher_pitches.csv → 疲勞分數 → Supabase（本次 email 後同步）")
+    if pitcher_csv_latest:
+        if pitch_new_rows > 0:
+            lines.append(f"  ✅ CSV 已更新，共 {pitcher_csv_rows:,} 球，最新資料 {pitcher_csv_latest}")
+            lines.append(f"     （Supabase 將在此 email 寄出後由 sync 步驟更新）")
         else:
-            lines.append(f"  ⚪ 無新增（最新 {fa.get('latest') or '–'}，共 {fa_tot:,} 筆）")
+            lines.append(f"  ⚪ 無新球種資料（CSV 最新 {pitcher_csv_latest}，共 {pitcher_csv_rows:,} 球）")
     else:
-        lines.append("  ⚠️ 資料查詢失敗")
+        lines.append("  ⚠️ 讀取 pitcher_pitches.csv 失敗")
     lines.append("")
 
     # 錯誤欄
@@ -430,6 +429,20 @@ def main():
         errors.append(f"投手逐球：{e}")
         print(f"⚠️  投手逐球更新失敗：{e}")
 
+    # ── 取 pitcher_pitches.csv 當前狀態（⑤ 的 Supabase sync 在 email 後才跑）──
+    pitcher_csv_latest = ""
+    pitcher_csv_rows   = 0
+    try:
+        import pandas as pd
+        df_csv = pd.read_csv(CSV_PATH, low_memory=False)
+        pitcher_csv_rows = len(df_csv)
+        if "game_date" in df_csv.columns and "year" in df_csv.columns:
+            cur_year_df = df_csv[df_csv["year"].astype(str) == str(year)]
+            if not cur_year_df.empty:
+                pitcher_csv_latest = cur_year_df["game_date"].max()
+    except Exception:
+        pass
+
     # ── 更新後快照 ────────────────────────────────────────────────────
     print("\n" + "="*55)
     print("取得更新後 Supabase 快照…")
@@ -455,6 +468,8 @@ def main():
             lin_li_new_games=lin_li_new_games,
             lin_li_total_games=lin_li_total_games,
             lin_li_latest_date=lin_li_latest_date,
+            pitcher_csv_latest=pitcher_csv_latest,
+            pitcher_csv_rows=pitcher_csv_rows,
         )
 
     subject = f"📊 CPBL 每日更新報告 {date_tp}"
