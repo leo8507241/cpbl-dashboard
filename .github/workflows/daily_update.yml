@@ -33,17 +33,57 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           python - <<'PYEOF'
-          import os, shutil
+          import os, shutil, sys
+          from huggingface_hub import HfApi
+
+          HF_TOKEN = os.environ["HF_TOKEN"]
+          REPO     = "leo88888/cpbl-dashboard"
+          FILENAME = "pitcher_pitches.csv"
+
+          # 先確認檔案是否存在於 Space，再決定要不要下載
+          api = HfApi(token=HF_TOKEN)
+          try:
+              files = [f.rfilename for f in api.list_repo_files(REPO, repo_type="space")]
+              exists_on_hf = FILENAME in files
+          except Exception as e:
+              print(f"⚠️  無法列出 Space 檔案：{e}")
+              exists_on_hf = False
+
+          if not exists_on_hf:
+              # 第一次執行或檔案遺失 → 建立只有 header 的空白 CSV，讓 pipeline 從頭重建
+              print("⚠️  HF Space 上沒有 pitcher_pitches.csv，建立空白 CSV，pipeline 將從頭重建資料")
+              import shutil as _sh
+              if os.path.exists("cpbl_skeleton.csv"):
+                  _sh.copy("cpbl_skeleton.csv", FILENAME)
+                  print("✅ 從 cpbl_skeleton.csv 複製 header")
+              else:
+                  # 寫入最小 header（和 fetch_new_pitchers.py 產出一致）
+                  header = ("pitcher,pitcher_uid,year,season_uid,game_date,inning,bases,"
+                            "end_outs,LI,RE24,WPA,away_score,home_score,batter,batter_uid,"
+                            "b_hand,pa_order,pitch_seq,balls_before,strikes_before,"
+                            "is_first_pitch,pitch_type,velocity,rpm,coord_x,coord_y,"
+                            "is_strike,is_ball,in_play,result_code,pa_result,pa_result_type,"
+                            "is_hit,trajectory,pitch_loc_x,pitch_loc_y\n")
+                  with open(FILENAME, "w", encoding="utf-8") as f:
+                      f.write(header)
+                  print("✅ 建立空白 header CSV")
+              sys.exit(0)
+
+          # 檔案存在 → 下載
           from huggingface_hub import hf_hub_download
-          path = hf_hub_download(
-              repo_id="leo88888/cpbl-dashboard",
-              filename="pitcher_pitches.csv",
-              repo_type="space",
-              token=os.environ["HF_TOKEN"],
-          )
-          shutil.copy(path, "pitcher_pitches.csv")
-          size = os.path.getsize("pitcher_pitches.csv")
-          print(f"✅ 下載完成，{size/1e6:.1f} MB")
+          try:
+              path = hf_hub_download(
+                  repo_id=REPO,
+                  filename=FILENAME,
+                  repo_type="space",
+                  token=HF_TOKEN,
+              )
+              shutil.copy(path, FILENAME)
+              size = os.path.getsize(FILENAME)
+              print(f"✅ 下載完成，{size/1e6:.1f} MB")
+          except Exception as e:
+              print(f"❌ 下載失敗：{e}")
+              sys.exit(1)
           PYEOF
 
       # ── 4. 執行每日更新 + 發送 LINE 報告 ───────────────────────
@@ -74,12 +114,18 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           python - <<'PYEOF'
-          import os
+          import os, sys
           from huggingface_hub import HfApi
+          FILENAME = "pitcher_pitches.csv"
+          if not os.path.exists(FILENAME):
+              print(f"⚠️  {FILENAME} 不存在，跳過上傳（pipeline 可能沒有產出資料）")
+              sys.exit(0)
+          size = os.path.getsize(FILENAME)
+          print(f"上傳 {FILENAME}（{size/1e6:.1f} MB）...")
           api = HfApi(token=os.environ["HF_TOKEN"])
           api.upload_file(
-              path_or_fileobj="pitcher_pitches.csv",
-              path_in_repo="pitcher_pitches.csv",
+              path_or_fileobj=FILENAME,
+              path_in_repo=FILENAME,
               repo_id="leo88888/cpbl-dashboard",
               repo_type="space",
               commit_message="Auto update pitcher_pitches.csv",
